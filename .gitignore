@@ -1,0 +1,20 @@
+# --- Raw data: large, regenerable, NEVER commit ---
+*.npy
+*.png
+clips/**/*.npy
+clips/**/*.png
+# Keep the condition sidecars (tiny) as an experiment record:
+!clips/**/*.json
+
+# --- Machine-specific config (contains this box's serial by-id port) ---
+victim.yaml
+
+# --- Python / uv ---
+__pycache__/
+*.pyc
+.venv/
+.uv/
+# NOTE: commit uv.lock (reproducible installs) -- do not ignore it.
+
+# --- OS noise ---
+.DS_Store

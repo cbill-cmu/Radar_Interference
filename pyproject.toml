@@ -1,0 +1,18 @@
+[project]
+name = "Radar_Interference"
+version = "0.1.0"
+description = "Multi-radar interference study"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "pyyaml",
+    "matplotlib",
+    # The xwr stack (radar control, DCA1000 capture, rsp processing).
+    # Verify this install string against the repo; if it fails, see the
+    # "Fallback" note in README.md (develop inside the xwr clone instead).
+    "xwr @ git+https://github.com/RadarML/xwr",
+]
+
+# Scripts are flat at the repo root and import each other (study.py imports
+# interference.py; render_clip.py shares processing with monitor.py), so run
+# them from the repo root with `uv run python <script>.py`.
