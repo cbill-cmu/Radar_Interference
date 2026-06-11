@@ -116,35 +116,68 @@ def _save_clip(state, p):
 # Processing -- mirrors demo.py exactly (range-Doppler + range-azimuth)
 # --------------------------------------------------------------------------- #
 class Renderer:
-    def __init__(self, rsp_name, azimuth=128):
+    """Lightweight range-Doppler renderer.
+
+    Cheap by design so the browser stays responsive: range-Doppler ONLY (no
+    azimuth FFT), reuses a single matplotlib figure, throttles to ~3 fps, and
+    caches the last PNG so repeated image loads and /status don't each trigger
+    a render.
+    """
+    def __init__(self, rsp_name, min_interval=0.33):
         from xwr.rsp import numpy as xwr_rsp
-        self.rsp = getattr(xwr_rsp, rsp_name)(window=False, size={"azimuth": azimuth})
+        self.rsp = getattr(xwr_rsp, rsp_name)(window=False)
+        self._fig, self._ax = plt.subplots(figsize=(7, 4.5))
+        self._im = None
+        self._png = None
+        self._last_id = -1
+        self._last_t = 0.0
+        self._min_interval = min_interval
+        self._lock = threading.Lock()
 
-    def panels(self, frame):
-        # demo.py: dear = |rsp(frame[None])|; mean over (batch, elev, az) -> RD,
-        # mean over (batch, doppler, elev) -> RA; swapaxes to (range, x).
-        dear = np.abs(self.rsp(frame[None, ...]))
-        rd = np.swapaxes(np.mean(dear, axis=(0, 2, 3)), 0, 1)   # (range, doppler)
-        ra = np.swapaxes(np.mean(dear, axis=(0, 1, 2)), 0, 1)   # (range, azimuth)
-        return rd, ra
+    def _rd(self, frame):
+        # Range-Doppler only (no azimuth) -> cheap. Deinterleave with the repo's
+        # validated routine; compute the RD map via rsp.doppler_range, falling
+        # back to a plain FFT so the live view never crashes on an API mismatch.
+        from xwr.rsp import iq_from_iiqq
+        iq = iq_from_iiqq(frame[None, ...])          # (1, doppler, tx, rx, range) complex
+        try:
+            rd = np.abs(self.rsp.doppler_range(iq))  # (1, doppler, tx, rx, range)
+        except Exception:
+            r = np.fft.fft(iq, axis=-1)              # range FFT
+            d = np.fft.fftshift(np.fft.fft(r, axis=1), axes=1)  # doppler FFT, centered
+            rd = np.abs(d)
+        return np.swapaxes(np.mean(rd, axis=(0, 2, 3)), 0, 1)   # (range, doppler)
 
-    def render_png(self, frame, db=True):
-        rd, ra = self.panels(frame)
+    def _render(self, frame, db):
+        data = self._rd(frame)
         if db:
-            rd = 20 * np.log10(rd + 1e-6)
-            ra = 20 * np.log10(ra + 1e-6)
-        fig, axs = plt.subplots(1, 2, figsize=(10, 4.2))
-        for ax, data, xlab in ((axs[0], rd, "Doppler"), (axs[1], ra, "Azimuth")):
-            im = ax.imshow(data, cmap="viridis", aspect="auto", origin="lower",
-                           vmin=np.min(data), vmax=np.max(data))
-            ax.set_xlabel(xlab); ax.set_ylabel("Range")
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        axs[0].set_title("Range-Doppler"); axs[1].set_title("Range-Azimuth")
-        fig.tight_layout()
+            data = 20 * np.log10(data + 1e-6)
+        if self._im is None:
+            self._im = self._ax.imshow(data, cmap="viridis", aspect="auto",
+                                       origin="lower")
+            self._ax.set_xlabel("Doppler"); self._ax.set_ylabel("Range")
+            self._ax.set_title("Range-Doppler")
+        else:
+            self._im.set_data(data)
+        self._im.set_clim(vmin=float(np.min(data)), vmax=float(np.max(data)))
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=90)
-        plt.close(fig)
+        self._fig.savefig(buf, format="png", dpi=85)
         return buf.getvalue()
+
+    def cached_png(self, state, db=True):
+        with state.lock:
+            frame = state.latest
+            fid = state.frame_count
+        if frame is None:
+            return None
+        with self._lock:
+            fresh = (fid != self._last_id
+                     and (time.perf_counter() - self._last_t) >= self._min_interval)
+            if fresh or self._png is None:
+                self._png = self._render(frame, db)
+                self._last_id = fid
+                self._last_t = time.perf_counter()
+            return self._png
 
 
 # --------------------------------------------------------------------------- #
@@ -200,11 +233,14 @@ def make_handler(state, renderer):
             pass
 
         def _send(self, code, ctype, body):
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # client navigated away / refreshed mid-transfer
 
         def do_GET(self):
             u = urlparse(self.path)
@@ -212,17 +248,14 @@ def make_handler(state, renderer):
             if u.path == "/":
                 self._send(200, "text/html", PAGE.encode())
             elif u.path == "/frame.png":
-                with state.lock:
-                    frame = None if state.latest is None else state.latest
-                if frame is None:
-                    self._send(503, "text/plain", b"no frame yet")
-                    return
                 db = qs.get("db", ["1"])[0] != "0"
                 try:
-                    png = renderer.render_png(frame, db=db)
-                    self._send(200, "image/png", png)
+                    png = renderer.cached_png(state, db=db)
                 except Exception as e:
-                    self._send(500, "text/plain", str(e).encode())
+                    self._send(500, "text/plain", str(e).encode()); return
+                if png is None:
+                    self._send(503, "text/plain", b"no frame yet"); return
+                self._send(200, "image/png", png)
             elif u.path == "/status":
                 with state.lock:
                     s = dict(frames=state.frame_count, fps=state.fps,
