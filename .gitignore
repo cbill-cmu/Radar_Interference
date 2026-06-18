@@ -1,13 +1,14 @@
-# --- Raw data: large, regenerable, NEVER commit ---
+# --- Raw data & rendered outputs: large, regenerable, NEVER commit ---
 *.npy
 *.png
-clips/**/*.npy
-clips/**/*.png
-# Keep the condition sidecars (tiny) as an experiment record:
-!clips/**/*.json
+*.gif
+*.mp4
+# Keep the tiny condition sidecars as the experiment record:
+!results/**/*.json
 
-# --- Machine-specific config (contains this box's serial by-id port) ---
-victim.yaml
+# --- Machine-specific configs (contain this box's serial by-id ports) ---
+*.yaml
+!*.example.yaml
 
 # --- Python / uv ---
 __pycache__/

@@ -57,6 +57,7 @@ class State:
         self.outdir = outdir
         self.cfg = cfg
         self.rsp_name = rsp_name
+        self.db = True
         os.makedirs(outdir, exist_ok=True)
 
 
@@ -116,67 +117,70 @@ def _save_clip(state, p):
 # Processing -- mirrors demo.py exactly (range-Doppler + range-azimuth)
 # --------------------------------------------------------------------------- #
 class Renderer:
-    """Lightweight range-Doppler renderer.
+    """Dual-panel (range-Doppler + range-azimuth) renderer on a BACKGROUND thread.
 
-    Cheap by design so the browser stays responsive: range-Doppler ONLY (no
-    azimuth FFT), reuses a single matplotlib figure, throttles to ~3 fps, and
-    caches the last PNG so repeated image loads and /status don't each trigger
-    a render.
+    The render loop runs independently at a target rate and writes the latest
+    PNG into a cache; the HTTP handler returns those cached bytes instantly, so
+    a browser request NEVER waits on rsp/matplotlib. Render cost only limits how
+    fast the picture updates -- it can never make the page laggy.
     """
-    def __init__(self, rsp_name, min_interval=0.33):
+    def __init__(self, rsp_name, target_fps=4.0, azimuth=64, dpi=72):
         from xwr.rsp import numpy as xwr_rsp
-        self.rsp = getattr(xwr_rsp, rsp_name)(window=False)
-        self._fig, self._ax = plt.subplots(figsize=(7, 4.5))
-        self._im = None
+        # Smaller azimuth FFT than demo's 128 keeps the second panel affordable.
+        self.rsp = getattr(xwr_rsp, rsp_name)(window=False, size={"azimuth": azimuth})
+        self._fig, self._axs = plt.subplots(1, 2, figsize=(9, 3.8))
+        self._ims = [None, None]
+        self._axs[0].set_xlabel("Doppler"); self._axs[0].set_ylabel("Range")
+        self._axs[0].set_title("Range-Doppler")
+        self._axs[1].set_xlabel("Azimuth"); self._axs[1].set_ylabel("Range")
+        self._axs[1].set_title("Range-Azimuth")
+        self._fig.tight_layout()
+        self._dpi = dpi
+        self._interval = 1.0 / target_fps
         self._png = None
-        self._last_id = -1
-        self._last_t = 0.0
-        self._min_interval = min_interval
         self._lock = threading.Lock()
 
-    def _rd(self, frame):
-        # Range-Doppler only (no azimuth) -> cheap. Deinterleave with the repo's
-        # validated routine; compute the RD map via rsp.doppler_range, falling
-        # back to a plain FFT so the live view never crashes on an API mismatch.
-        from xwr.rsp import iq_from_iiqq
-        iq = iq_from_iiqq(frame[None, ...])          # (1, doppler, tx, rx, range) complex
-        try:
-            rd = np.abs(self.rsp.doppler_range(iq))  # (1, doppler, tx, rx, range)
-        except Exception:
-            r = np.fft.fft(iq, axis=-1)              # range FFT
-            d = np.fft.fftshift(np.fft.fft(r, axis=1), axes=1)  # doppler FFT, centered
-            rd = np.abs(d)
-        return np.swapaxes(np.mean(rd, axis=(0, 2, 3)), 0, 1)   # (range, doppler)
+    def _panels(self, frame):
+        # demo.py processing: full DRAE, then mean to RD and RA.
+        dear = np.abs(self.rsp(frame[None, ...]))
+        rd = np.swapaxes(np.mean(dear, axis=(0, 2, 3)), 0, 1)   # (range, doppler)
+        ra = np.swapaxes(np.mean(dear, axis=(0, 1, 2)), 0, 1)   # (range, azimuth)
+        return rd, ra
 
     def _render(self, frame, db):
-        data = self._rd(frame)
+        rd, ra = self._panels(frame)
         if db:
-            data = 20 * np.log10(data + 1e-6)
-        if self._im is None:
-            self._im = self._ax.imshow(data, cmap="viridis", aspect="auto",
-                                       origin="lower")
-            self._ax.set_xlabel("Doppler"); self._ax.set_ylabel("Range")
-            self._ax.set_title("Range-Doppler")
-        else:
-            self._im.set_data(data)
-        self._im.set_clim(vmin=float(np.min(data)), vmax=float(np.max(data)))
+            rd = 20 * np.log10(rd + 1e-6); ra = 20 * np.log10(ra + 1e-6)
+        for i, data in enumerate((rd, ra)):
+            if self._ims[i] is None:
+                self._ims[i] = self._axs[i].imshow(
+                    data, cmap="viridis", aspect="auto", origin="lower")
+            else:
+                self._ims[i].set_data(data)
+            self._ims[i].set_clim(vmin=float(np.min(data)), vmax=float(np.max(data)))
         buf = io.BytesIO()
-        self._fig.savefig(buf, format="png", dpi=85)
+        self._fig.savefig(buf, format="png", dpi=self._dpi)
         return buf.getvalue()
 
-    def cached_png(self, state, db=True):
-        with state.lock:
-            frame = state.latest
-            fid = state.frame_count
-        if frame is None:
-            return None
+    def render_loop(self, state, stop_event):
+        log = logging.getLogger("monitor.render")
+        while not stop_event.is_set():
+            t0 = time.perf_counter()
+            with state.lock:
+                frame = state.latest
+                db = state.db
+            if frame is not None:
+                try:
+                    png = self._render(frame, db)
+                    with self._lock:
+                        self._png = png
+                except Exception as e:
+                    log.warning("render error: %s", e)
+            dt = time.perf_counter() - t0
+            time.sleep(max(0.0, self._interval - dt))
+
+    def latest_png(self):
         with self._lock:
-            fresh = (fid != self._last_id
-                     and (time.perf_counter() - self._last_t) >= self._min_interval)
-            if fresh or self._png is None:
-                self._png = self._render(frame, db)
-                self._last_id = fid
-                self._last_t = time.perf_counter()
             return self._png
 
 
@@ -209,10 +213,12 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <div id="status">connecting...</div>
 <script>
  const v=document.getElementById('view');
- function refresh(){const u='/frame.png?db='+(document.getElementById('db').checked?1:0)+'&t='+Date.now();
-   const im=new Image(); im.onload=()=>{v.src=im.src; setTimeout(refresh,500);};
-   im.onerror=()=>setTimeout(refresh,1000); im.src=u;}
- refresh();
+ // Cached bytes -> requests are instant; refresh on a steady timer.
+ function refresh(){const im=new Image();
+   im.onload=()=>{v.src=im.src;}; im.src='/frame.png?t='+Date.now();}
+ setInterval(refresh,300);
+ document.getElementById('db').onchange=function(){
+   fetch('/config?db='+(this.checked?1:0));};
  function meta(){return 'angle='+encodeURIComponent(angle.value)+'&pol='+encodeURIComponent(pol.value)
    +'&foff='+encodeURIComponent(foff.value)+'&sep='+encodeURIComponent(sep.value)
    +'&note='+encodeURIComponent(note.value);}
@@ -248,14 +254,15 @@ def make_handler(state, renderer):
             if u.path == "/":
                 self._send(200, "text/html", PAGE.encode())
             elif u.path == "/frame.png":
-                db = qs.get("db", ["1"])[0] != "0"
-                try:
-                    png = renderer.cached_png(state, db=db)
-                except Exception as e:
-                    self._send(500, "text/plain", str(e).encode()); return
+                png = renderer.latest_png()  # cached; never blocks on rendering
                 if png is None:
                     self._send(503, "text/plain", b"no frame yet"); return
                 self._send(200, "image/png", png)
+            elif u.path == "/config":
+                if "db" in qs:
+                    with state.lock:
+                        state.db = qs["db"][0] != "0"
+                self._send(200, "text/plain", b"ok")
             elif u.path == "/status":
                 with state.lock:
                     s = dict(frames=state.frame_count, fps=state.fps,
@@ -293,7 +300,7 @@ def main():
     ap.add_argument("--buffer-seconds", type=float, default=3.0, help="pre-trigger buffer")
     ap.add_argument("--post-seconds", type=float, default=3.0, help="post-trigger capture")
     ap.add_argument("--port", type=int, default=8000)
-    ap.add_argument("--outdir", default="clips")
+    ap.add_argument("--outdir", default="results")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(name)-16s %(message)s")
@@ -314,6 +321,8 @@ def main():
     stop = threading.Event()
     cap = threading.Thread(target=capture_loop, args=(state, cfg, stop), daemon=True)
     cap.start()
+    rnd = threading.Thread(target=renderer.render_loop, args=(state, stop), daemon=True)
+    rnd.start()
 
     srv = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(state, renderer))
     logging.getLogger("monitor").info("open http://<radar-host>:%d in your browser", args.port)
