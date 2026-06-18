@@ -20,8 +20,10 @@ Radar_Interference/
 |-- monitor.py               # HARDWARE: victim live view + clip capture -> results/
 |-- analysis/
 |   |-- render_clip.py        # stills / frame strip / video from a clip
-|   `-- interference.py       # raw-domain corruption metrics
-`-- results/                 # RAW captured clips (.npy) + sidecars (.json)
+|   |-- interference.py       # raw-domain corruption metrics
+|   |-- manifest.py           # index all captures into a readable table / CSV
+|   `-- reorganize.py         # migrate old flat clips into the naming scheme
+`-- results/                 # RAW clips, auto-sorted into a{ang}_p{pol}_s{sep}/ subfolders
     `-- .gitkeep
 ```
 
@@ -126,6 +128,24 @@ into `analysis/`. A clip with a fully-lit frame among clean neighbors is the
 normal slope-mismatch signature: that frame is corrupted (broadband wipeout),
 its neighbors usable. The fraction of corrupted frames is your answer to
 "can these run simultaneously."
+
+### Finding clips
+
+Captures are auto-named from their conditions and sorted into subfolders:
+`results/a{angle}_p{pol}_s{sep}/{label}_a{angle}_p{pol}_f{foff}_s{sep}_{timestamp}.npy`
+(empty fields become `na`). To see everything at a glance:
+
+```bash
+cd analysis
+uv run python manifest.py                      # readable table of all captures
+uv run python manifest.py --csv ../results/manifest.csv
+
+# Migrate old timestamp-only clips into the naming scheme (preview, then apply):
+uv run python reorganize.py
+uv run python reorganize.py --apply
+```
+
+`manifest.py` reads the `.json` sidecars, so it works on old and new files alike.
 
 ---
 

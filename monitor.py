@@ -26,6 +26,7 @@ import io
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -94,13 +95,27 @@ def capture_loop(state, cfg, stop_event):
         log.info("capture stopped")
 
 
+def _tok(v, default="na"):
+    """Sanitize a condition field into a short, filename-safe token."""
+    s = re.sub(r"[^A-Za-z0-9.+-]", "", str(v).strip())
+    return s if s else default
+
+
 def _save_clip(state, p):
     log = logging.getLogger("monitor.save")
     frames = np.stack(p["past"] + p["future"])
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base = os.path.join(state.outdir, f"{p['label']}_{ts}")
+    m = p["meta"]
+    a, pol, foff, sep = (_tok(m.get(k)) for k in ("angle", "pol", "foff", "sep"))
+    # Per-condition subfolder = physical placement (angle/pol/separation).
+    subdir = os.path.join(state.outdir, f"a{a}_p{pol}_s{sep}")
+    os.makedirs(subdir, exist_ok=True)
+    # Descriptive filename carries ALL fields, so it's self-describing even
+    # if moved out of its folder. (note stays in the sidecar only.)
+    name = f"{p['label']}_a{a}_p{pol}_f{foff}_s{sep}_{ts}"
+    base = os.path.join(subdir, name)
     np.save(base + ".npy", frames)
-    meta = dict(p["meta"])
+    meta = dict(m)
     meta.update(label=p["label"], timestamp=ts,
                 n_frames=int(frames.shape[0]),
                 pre_frames=len(p["past"]), post_frames=len(p["future"]),
@@ -110,7 +125,7 @@ def _save_clip(state, p):
         json.dump(meta, fh, indent=2)
     with state.lock:
         state.last_saved = base + ".npy"
-    log.info("saved clip %s.npy (%d frames)", base, frames.shape[0])
+    log.info("saved %s.npy (%d frames)", base, frames.shape[0])
 
 
 # --------------------------------------------------------------------------- #
