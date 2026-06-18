@@ -116,9 +116,9 @@ Analyze a whole subfolder (its baseline + every clip) in one command:
 
 ```bash
 cd analysis
-uv run python render.py ../results/a90_p0_s30            # renders + metrics + summary
-uv run python render.py ../results/a90_p0_s30 --strip --video
-uv run python render.py ../results/a90_p0_s30 --no-render   # metrics only (fast)
+uv run python render_folder.py ../results/a90_p0_s30            # renders + metrics + summary
+uv run python render_folder.py ../results/a90_p0_s30 --strip --video
+uv run python render_folder.py ../results/a90_p0_s30 --no-render   # metrics only (fast)
 ```
 
 This writes `analysis/a90_p0_s30/` containing a per-clip folder (comparison
@@ -148,10 +148,10 @@ To work with a single clip instead:
 cd ~/.../Radar_Interference/analysis
 
 # Side-by-side stills vs baseline:
-uv run python render_clip.py ../results/clip_<ts>.npy --baseline ../results/baseline_<ts>.npy
+uv run python render.py ../results/clip_<ts>.npy --baseline ../results/baseline_<ts>.npy
 
 # Frame strip (whole event at a glance) + slowed video:
-uv run python render_clip.py ../results/clip_<ts>.npy --strip --video --fps 5
+uv run python render.py ../results/clip_<ts>.npy --strip --video --fps 5
 
 # Quantify "usable vs corrupted" (raw-domain metrics):
 uv run python interference.py analyze ../results/baseline_<ts>.npy ../results/clip_<ts>.npy --k 8
