@@ -58,7 +58,7 @@ def start_aggressor(radar):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--config", default="aggressor.yaml",
+    ap.add_argument("--config", default="settings/aggressor.yaml",
                     help="YAML config (same structure as victim.yaml)")
     # Per-run overrides (optional). Anything left out uses the YAML value.
     ap.add_argument("--port", default=None, help="override config port")

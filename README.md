@@ -12,17 +12,17 @@ render/quantify those clips afterward.
 ```
 Radar_Interference/
 |-- README.md  pyproject.toml  .gitignore
-|-- victim.example.yaml      # committed templates (real *.yaml are gitignored)
-|-- aggressor.example.yaml
-|-- victim.yaml              # real victim config w/ this box's port
-|-- aggressor.yaml           # real aggressor config w/ this box's port
 |-- aggressor.py             # HARDWARE: transmit-only interferer (reads aggressor.yaml)
 |-- monitor.py               # HARDWARE: victim live view + clip capture -> results/
+|-- settings/
+|   |-- victim.example.yaml      # committed templates (real *.yaml are gitignore)
+|   |-- aggressor.example.yaml
+|   |-- victim.yaml              # real victim config w/ this box's port
+|   |-- aggressor.yaml           # real aggressor config w/ this box's port  
 |-- analysis/
 |   |-- render_clip.py        # stills / frame strip / video from a clip
 |   |-- interference.py       # raw-domain corruption metrics
-|   |-- render.py     # analyze ONE subfolder (baseline + clips) at once
-|   |-- sweep.py              # compare ACROSS subfolders (the 2D-sweep view)
+|   |-- render.py             # analyze ONE subfolder (baseline + clips) at once
 |   |-- manifest.py           # index all captures into a readable table / CSV
 |   `-- reorganize.py         # migrate old flat clips into the naming scheme
 `-- results/                 # RAW clips, auto-sorted into a{ang}_p{pol}_s{sep}/ subfolders
@@ -54,6 +54,7 @@ ls -l /dev/serial/by-id/
 
 First-time only, create the real configs from the templates and set the ports:
 ```bash
+cd settings 
 cp victim.example.yaml victim.yaml
 cp aggressor.example.yaml aggressor.yaml
 # then edit radar.port in each
@@ -66,19 +67,52 @@ functional mode (S2.2 up, others down).
 
 ## The experiment: one cell at a time
 
-The study is a 2D sweep -- pointing **angle** {0, 90, 180, 270 deg} x **frequency
-offset** (4-5 values) -- repeated for each **polarization** (board roll). One
-"cell" = one (angle, polarization, freq-offset) combination.
+The study looks at mutiple variables: 
+1. pointing **angle** {0, 90, 180, 270 deg} 
+2. **Starting frequency offset** 
+3. **Distance**
+4. **Polariation**
+
 
 ### A. Start the session (once per sitting)
 
 Terminal 1 (tmux pane), victim live view:
 ```bash
 cd ~/.../Radar_Interference
-uv run python monitor.py --config victim.yaml --buffer-seconds 3 --post-seconds 3
+uv run python monitor.py --config settings/<CHOSEN_CONFIG> --buffer-seconds 3 --post-seconds 3
 ```
 Open `http://<box-LAN-ip>:8000` (get it with `hostname -I`; use the 172.x, not
 192.168.33.x). Leave this running for the whole session.
+
+#### Browser monitor + retroactive clip capture
+
+No X server needed. The monitor captures the victim continuously, renders the
+live view as an image served over HTTP, and lets you save a raw clip spanning a
+few seconds **before and after** the moment you click.
+
+###### 1. Capture a baseline (aggressor OFF)
+
+Fill in the condition fields (angle, polarization roll, freq offset, separation,
+note), then click **Save BASELINE**. These fields are recorded in a JSON sidecar
+next to every clip, so each capture is self-describing.
+
+###### 2. Capture interference (aggressor ON)
+
+Start the aggressor in another terminal, watch the panels, and when you see
+something wrong click **Save CLIP** (or press **spacebar**). The status line
+shows the buffer filling and confirms each save. The clip contains gap-free raw
+frames from before and after your click.
+
+###### Notes
+
+- Live view uses the latest frame; saved clips use a gap-free `qstream` buffer,
+  so analysis is faithful even though the on-screen view may skip frames.
+- One process owns the DCA. Run **only** the monitor on the victim (not the
+  monitor and a separate capture at once).
+- The aggressor is independent (serial only); start/stop it as before.
+- For the 2D sweep (4 angles x 4 polarizations x 4-5 freq offsets), set each
+  physical angle/polarization by hand, take a baseline + clips per freq offset,
+  and label every capture via the page fields. 
 
 ### B. For each PHYSICAL configuration (set by hand)
 
@@ -109,39 +143,20 @@ Everything you clip lands in `results/` as `clip_<timestamp>.npy` + `.json`
 offsets.
 
 ---
-
 ## Analysis (after capture)
-
 Analyze a whole subfolder (its baseline + every clip) in one command:
 
 ```bash
 cd analysis
-uv run python render_folder.py ../results/a90_p0_s30            # renders + metrics + summary
+uv run python render_folder.py ../results/a90_p0_s30               # renders + summary
 uv run python render_folder.py ../results/a90_p0_s30 --strip --video
-uv run python render_folder.py ../results/a90_p0_s30 --no-render   # metrics only (fast)
 ```
 
 This writes `analysis/a90_p0_s30/` containing a per-clip folder (comparison
 stills, plus strip/video if asked) for each clip, a `summary.csv` of raw-domain
-metrics for the baseline and every clip, and `summary.png` plotting corruption
-vs frequency offset (the variable that changes within a folder).
+metrics for the baseline and every clip
 
-### Comparing across configurations (the 2D-sweep view)
-
-`sweep.py` aggregates every clip from every subfolder and compares them, e.g.
-corruption vs frequency offset with one line per pointing angle:
-
-```bash
-cd analysis
-uv run python sweep.py                                   # all folders, defaults
-uv run python sweep.py --group angle --x foff --metric corrupt_sample_frac
-uv run python sweep.py --group angle,pol --metric interfered_frame_rate
-```
-
-It writes `master_summary.csv` (every clip, all fields + metrics), a grouped
-line plot, and a pivot CSV (group x x-value -> metric). Metrics are raw-domain
-only (no rendering), so it's quick and needs no display.
-
+### For Single Capture rendering (after caatpure)
 To work with a single clip instead:
 
 ```bash
@@ -152,9 +167,6 @@ uv run python render.py ../results/clip_<ts>.npy --baseline ../results/baseline_
 
 # Frame strip (whole event at a glance) + slowed video:
 uv run python render.py ../results/clip_<ts>.npy --strip --video --fps 5
-
-# Quantify "usable vs corrupted" (raw-domain metrics):
-uv run python interference.py analyze ../results/baseline_<ts>.npy ../results/clip_<ts>.npy --k 8
 ```
 
 Renders (`comparison_*.png`, `frame_strip.png`, `clip_video.gif/mp4`) are written

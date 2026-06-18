@@ -6,13 +6,10 @@ and every clip, then for each clip:
   * renders comparison_mean.png + comparison_worst.png vs the baseline
     (and frame_strip.png / clip_video.* if you pass --strip / --video)
   * computes raw-domain interference metrics
-and writes a per-folder summary: a printed table, summary.csv, and -- since
-angle/pol/separation are fixed within a folder and only the frequency offset
-varies -- a summary.png of corruption vs frequency offset.
+and writes a per-folder summary: a printed table, summary.csv
 
     uv run python render_folder.py ../results/a90_p0_s30
     uv run python render_folder.py ../results/a90_p0_s30 --strip --video
-    uv run python render_folder.py ../results/a90_p0_s30 --no-render   # metrics only (fast)
 
 Outputs go to  <outdir>/<folder-name>/  (default outdir = current directory).
 """
@@ -27,7 +24,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import render_clip as rc          # sibling modules in analysis/
+import render as rc          # sibling modules in analysis/
 import interference as ix
 
 METRIC_KEYS = ["corrupt_sample_frac", "saturated_frac", "affected_chirp_frac",
@@ -62,7 +59,6 @@ def main():
     ap.add_argument("--outdir", default=".", help="where to write analysis outputs")
     ap.add_argument("--rsp", default="AWR1843AOP")
     ap.add_argument("--k", type=float, default=8.0, help="MAD threshold for metrics")
-    ap.add_argument("--no-render", action="store_true", help="metrics + summary only")
     ap.add_argument("--no-metrics", action="store_true", help="renders only")
     ap.add_argument("--strip", action="store_true")
     ap.add_argument("--video", action="store_true")
@@ -150,31 +146,6 @@ def main():
             wr = csv.DictWriter(fh, fieldnames=cols); wr.writeheader()
             wr.writerows([{c: r.get(c, "") for c in cols} for r in rows])
         print(f"\nwrote {csv_path}")
-
-        # ---- corruption vs frequency-offset plot ----
-        pts = [(_foff_num(m), r) for (npy, m), r in zip(clips, [x for x in rows if x["clip"] != "BASELINE"])]
-        pts = [(f, r) for f, r in pts if f is not None]
-        if len(pts) >= 2:
-            pts.sort(key=lambda t: t[0])
-            xs = [f for f, _ in pts]
-            corrupt = [r["corrupt_sample_frac"] for _, r in pts]
-            frames = [r["interfered_frame_rate"] * 100 for _, r in pts]
-            fig, ax1 = plt.subplots(figsize=(7, 4))
-            ax1.plot(xs, corrupt, "o-", color="tab:red")
-            ax1.set_xlabel("frequency offset (MHz)")
-            ax1.set_ylabel("corrupt-sample fraction", color="tab:red")
-            if base_metrics is not None:
-                ax1.axhline(base_metrics["corrupt_sample_frac"], ls=":", color="0.5",
-                            label="baseline")
-                ax1.legend(loc="upper left")
-            ax2 = ax1.twinx()
-            ax2.plot(xs, frames, "s--", color="tab:blue")
-            ax2.set_ylabel("interfered frames (%)", color="tab:blue")
-            ax1.set_title(f"{name}: interference vs frequency offset")
-            fig.tight_layout(); fig.savefig(os.path.join(out, "summary.png"), dpi=110)
-            plt.close(fig)
-            print(f"wrote {os.path.join(out, 'summary.png')}")
-
 
 if __name__ == "__main__":
     main()

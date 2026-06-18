@@ -309,7 +309,7 @@ def make_handler(state, renderer):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--config", default="victim.yaml")
+    ap.add_argument("--config", default="settings/victim.yaml")
     ap.add_argument("--rsp", default="AWR1843AOP")
     ap.add_argument("--device", default="AWR1843")
     ap.add_argument("--buffer-seconds", type=float, default=3.0, help="pre-trigger buffer")
