@@ -21,6 +21,8 @@ Radar_Interference/
 |-- analysis/
 |   |-- render_clip.py        # stills / frame strip / video from a clip
 |   |-- interference.py       # raw-domain corruption metrics
+|   |-- render.py     # analyze ONE subfolder (baseline + clips) at once
+|   |-- sweep.py              # compare ACROSS subfolders (the 2D-sweep view)
 |   |-- manifest.py           # index all captures into a readable table / CSV
 |   `-- reorganize.py         # migrate old flat clips into the naming scheme
 `-- results/                 # RAW clips, auto-sorted into a{ang}_p{pol}_s{sep}/ subfolders
@@ -109,6 +111,38 @@ offsets.
 ---
 
 ## Analysis (after capture)
+
+Analyze a whole subfolder (its baseline + every clip) in one command:
+
+```bash
+cd analysis
+uv run python render.py ../results/a90_p0_s30            # renders + metrics + summary
+uv run python render.py ../results/a90_p0_s30 --strip --video
+uv run python render.py ../results/a90_p0_s30 --no-render   # metrics only (fast)
+```
+
+This writes `analysis/a90_p0_s30/` containing a per-clip folder (comparison
+stills, plus strip/video if asked) for each clip, a `summary.csv` of raw-domain
+metrics for the baseline and every clip, and `summary.png` plotting corruption
+vs frequency offset (the variable that changes within a folder).
+
+### Comparing across configurations (the 2D-sweep view)
+
+`sweep.py` aggregates every clip from every subfolder and compares them, e.g.
+corruption vs frequency offset with one line per pointing angle:
+
+```bash
+cd analysis
+uv run python sweep.py                                   # all folders, defaults
+uv run python sweep.py --group angle --x foff --metric corrupt_sample_frac
+uv run python sweep.py --group angle,pol --metric interfered_frame_rate
+```
+
+It writes `master_summary.csv` (every clip, all fields + metrics), a grouped
+line plot, and a pivot CSV (group x x-value -> metric). Metrics are raw-domain
+only (no rendering), so it's quick and needs no display.
+
+To work with a single clip instead:
 
 ```bash
 cd ~/.../Radar_Interference/analysis
