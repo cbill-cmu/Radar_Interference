@@ -1,0 +1,23 @@
+# TEMPLATE -- copy to victim.yaml and fill in this box's serial port.
+#   cp victim.example.yaml victim.yaml
+# victim.yaml is gitignored because the by-id port is machine-specific.
+#
+# Find the victim board's *Enhanced* (if00) control port:
+#   ls -l /dev/serial/by-id/
+radar:
+  device: AWR1843
+  port: /dev/serial/by-id/REPLACE_WITH_VICTIM_ENHANCED_PORT
+  frequency: 77.0
+  idle_time: 6.0
+  adc_start_time: 5.7
+  ramp_end_time: 34.0
+  tx_start_time: 1.0
+  freq_slope: 67.012
+  adc_samples: 256
+  sample_rate: 10000
+  frame_length: 64
+  frame_period: 50.0
+capture:
+  sys_ip: 192.168.33.30
+  fpga_ip: 192.168.33.180
+  socket_buffer: 6291456

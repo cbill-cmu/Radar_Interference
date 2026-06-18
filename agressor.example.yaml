@@ -1,0 +1,22 @@
+# Aggressor (interferer) radar config. Copy to aggressor.yaml and set the port:
+#   cp aggressor.example.yaml aggressor.yaml
+# aggressor.yaml is gitignored (machine-specific port).
+#
+# Find the aggressor board's *Enhanced* (if00) control port:
+#   ls -l /dev/serial/by-id/   (use the OTHER serial number from the victim)
+#
+# During a frequency-offset sweep you don't edit this file -- override per run:
+#   uv run python aggressor.py --frequency 77.1   (= +100 MHz offset from victim)
+radar:
+  device: AWR1843
+  port: /dev/serial/by-id/REPLACE_WITH_AGGRESSOR_ENHANCED_PORT
+  frequency: 77.0          # GHz; offset from victim = frequency - 77.0
+  idle_time: 6.0
+  adc_start_time: 5.7
+  ramp_end_time: 34.0
+  tx_start_time: 1.0
+  freq_slope: 50.0         # MHz/us; differ from victim (67.012) for broadband interference
+  adc_samples: 256
+  sample_rate: 10000
+  frame_length: 64
+  frame_period: 55.0       # ms; offset from victim (50.0) so events drift across frames
