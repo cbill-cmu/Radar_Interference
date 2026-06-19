@@ -110,8 +110,8 @@ def _save_clip(state, p):
     a, pol, foff, sep = (_tok(m.get(k)) for k in ("angle", "pol", "foff", "sep"))
     # Per-condition subfolder = physical placement (angle/pol/separation).
     grp = _tok(m.get("name"), default="")
-    root = os.path.join(state.outdir, grp) if grp else state.outdir
-    subdir = os.path.join(root, f"a{a}_p{pol}_s{sep}")
+    subdir = os.path.join(state.outdir, grp) if grp else \
+             os.path.join(state.outdir, f"a{a}_p{pol}_s{sep}")
     os.makedirs(subdir, exist_ok=True)
     # Descriptive filename carries ALL fields, so it's self-describing even
     # if moved out of its folder. (note stays in the sidecar only.)
