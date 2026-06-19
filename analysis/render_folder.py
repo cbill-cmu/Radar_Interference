@@ -67,6 +67,8 @@ def main():
     ap.add_argument("--stride", type=int, default=1)
     ap.add_argument("--cols", type=int, default=10)
     ap.add_argument("--format", choices=["auto", "gif", "mp4"], default="auto")
+    ap.add_argument("--name", default=None, help="output subfolder name (default: input folder name)")
+    ap.add_argument("--no-render", action="store_true", help="metrics + summary only")
     args = ap.parse_args()
 
     folder = args.folder.rstrip("/")
@@ -74,7 +76,7 @@ def main():
     if not clips:
         print(f"No clips found in {folder}")
         return
-    name = os.path.basename(folder)
+    name = args.name or os.path.basename(folder.rstrip("/"))
     out = os.path.join(args.outdir, name)
     os.makedirs(out, exist_ok=True)
     print(f"folder: {folder}\nbaseline: {os.path.basename(baseline[0]) if baseline else 'NONE'}"

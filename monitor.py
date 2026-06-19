@@ -26,6 +26,7 @@ import io
 import json
 import logging
 import os
+from posixpath import sep
 import re
 import threading
 import time
@@ -108,7 +109,9 @@ def _save_clip(state, p):
     m = p["meta"]
     a, pol, foff, sep = (_tok(m.get(k)) for k in ("angle", "pol", "foff", "sep"))
     # Per-condition subfolder = physical placement (angle/pol/separation).
-    subdir = os.path.join(state.outdir, f"a{a}_p{pol}_s{sep}")
+    grp = _tok(m.get("name"), default="")
+    root = os.path.join(state.outdir, grp) if grp else state.outdir
+    subdir = os.path.join(root, f"a{a}_p{pol}_s{sep}")
     os.makedirs(subdir, exist_ok=True)
     # Descriptive filename carries ALL fields, so it's self-describing even
     # if moved out of its folder. (note stays in the sidecar only.)
@@ -215,6 +218,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 </style></head><body>
 <h2>Radar interference monitor</h2>
 <img id="view" src="/frame.png"><br>
+<div class="row"><label>Folder/name</label><input id="name" placeholder="e.g. 60cm_77f_v_76f" style="width:340px"></div>
 <div class="row"><label><input type="checkbox" id="db" checked> dB scale</label></div>
 <div class="row"><label>Pointing angle</label><input id="angle" placeholder="deg, e.g. 90">
   <label>Polarization</label><input id="pol" placeholder="roll deg, e.g. 0"></div>
@@ -236,7 +240,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
    fetch('/config?db='+(this.checked?1:0));};
  function meta(){return 'angle='+encodeURIComponent(angle.value)+'&pol='+encodeURIComponent(pol.value)
    +'&foff='+encodeURIComponent(foff.value)+'&sep='+encodeURIComponent(sep.value)
-   +'&note='+encodeURIComponent(note.value);}
+   +'&note='+encodeURIComponent(note.value)+'&name='+encodeURIComponent(name.value);}
  function trig(label){fetch('/trigger?label='+label+'&'+meta()).then(r=>r.text()).then(t=>{status.textContent=t;});}
  document.getElementById('clip').onclick=()=>trig('clip');
  document.getElementById('base').onclick=()=>trig('baseline');
@@ -287,7 +291,7 @@ def make_handler(state, renderer):
                 self._send(200, "application/json", json.dumps(s).encode())
             elif u.path == "/trigger":
                 label = qs.get("label", ["clip"])[0]
-                meta = {k: qs.get(k, [""])[0] for k in ("angle", "pol", "foff", "sep", "note")}
+                meta = {k: qs.get(k, [""])[0] for k in ("angle", "pol", "foff", "sep", "note", "name")}
                 with state.lock:
                     if state.pending is not None:
                         self._send(200, "text/plain", b"busy: a clip is already being captured")
