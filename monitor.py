@@ -240,7 +240,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
    fetch('/config?db='+(this.checked?1:0));};
  function meta(){return 'angle='+encodeURIComponent(angle.value)+'&pol='+encodeURIComponent(pol.value)
    +'&foff='+encodeURIComponent(foff.value)+'&sep='+encodeURIComponent(sep.value)
-   +'&note='+encodeURIComponent(note.value)+'&name='+encodeURIComponent(name.value);}
+   +'&note='+encodeURIComponent(note.value)+'&name='+encodeURIComponent(document.getElementById('name').value);}
  function trig(label){fetch('/trigger?label='+label+'&'+meta()).then(r=>r.text()).then(t=>{status.textContent=t;});}
  document.getElementById('clip').onclick=()=>trig('clip');
  document.getElementById('base').onclick=()=>trig('baseline');
